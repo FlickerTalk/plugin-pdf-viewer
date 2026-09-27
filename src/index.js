@@ -286,6 +286,9 @@ class PdfViewer extends HTMLElement {
   // ---- Zoom: two fingers, or a double tap ----
 
   onPointerDown(event) {
+    // A primary pointer is the first finger down, so none is left: a lift that never arrived (its
+    // canvas repainted away under the finger) must not turn the next tap into a pinch.
+    if (event.isPrimary) this.pointers.clear();
     this.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (this.pointers.size === 2) {
       const [a, b] = [...this.pointers.values()];

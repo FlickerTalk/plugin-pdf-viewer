@@ -118,6 +118,26 @@ describe("the view", () => {
     expect(core.ft.close).toHaveBeenCalled();
   });
 
+  // Found on the Lenovo (2026-09-28): the tap that zooms repaints, the canvas under the finger
+  // goes, and its pointerup never reaches the pages. The next double tap has to work all the same.
+  it("zooms back with a second double tap, even when the finger's lift was lost", async () => {
+    await core.open({ file: { name: "menu.pdf", mime: "application/pdf", data: fixture("simple.pdf").toString("base64") } });
+    await settle();
+    const sheet = () => inside().querySelector(".sheet");
+    const fit = sheet().style.width;
+    const finger = (type, pointerId) => sheet().dispatchEvent(new PointerEvent(type, { pointerId, isPrimary: true, bubbles: true, composed: true }));
+    finger("pointerdown", 1);
+    finger("pointerup", 1);
+    finger("pointerdown", 2); // zooms; its pointerup is lost with the canvas
+    expect(sheet().style.width).not.toBe(fit);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    finger("pointerdown", 3);
+    finger("pointerup", 3);
+    finger("pointerdown", 4);
+    finger("pointerup", 4);
+    expect(sheet().style.width).toBe(fit);
+  });
+
   it("says when the PDF is locked, broken, or missing", async () => {
     await core.open({ file: { name: "x.pdf", mime: "application/pdf", data: fixture("locked.pdf").toString("base64") } });
     await settle();
