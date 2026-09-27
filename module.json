@@ -1,0 +1,17 @@
+{
+  "id": "com.flickertalk.pdfviewer",
+  "name": "PDF viewer",
+  "version": "1.0.0",
+  "minCoreVersion": "1.2.0",
+  "components": [
+    "ft-pdf-viewer"
+  ],
+  "opens": [
+    "application/pdf"
+  ],
+  "views": [
+    "application/pdf"
+  ],
+  "permissions": {},
+  "summary": "Read PDFs sent in a chat without leaving the app."
+}
