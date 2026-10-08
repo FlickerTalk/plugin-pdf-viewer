@@ -4,7 +4,8 @@
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { CANVAS_PIXELS, currentPage, failureOf, fitScale, fromBase64, nearPages, openDocument, ratioFor, toggledZoom } from "./src/index.js";
+import { CANVAS_PIXELS, PAGE_DELAY, currentPage, failureOf, fitScale, fromBase64, nearPages, openDocument, ratioFor, toggledZoom } from "./src/index.js";
+import { HELLO, PAGE, decode, encode } from "./src/live.js";
 import { LANGUAGES, catalogueOf, t } from "./src/i18n.js";
 
 const fixture = (name) => readFileSync(join(import.meta.dirname, "test", "fixtures", name));
@@ -82,12 +83,17 @@ describe("the catalogue and the package", () => {
   });
 });
 
-/** A fake core: it hands the file over and hears the close. */
+/** A fake core: it hands the file over, hears the close, and carries the live channel. */
 function fakeCore() {
   const handlers = [];
+  const heard = [];
   return {
+    heard,
     open: (opening) => Promise.all(handlers.map((handler) => handler({ text: "", dark: false, lang: "en", file: null, ref: null, reminder: null, live: false, ...opening }))),
-    ft: { onOpen: (handler) => handlers.push(handler), close: vi.fn() },
+    hear: async (message) => {
+      for (const handler of heard) await handler(encode(message));
+    },
+    ft: { onOpen: (handler) => handlers.push(handler), close: vi.fn(), live: { send: vi.fn(async () => true), onMessage: (handler) => heard.push(handler) } },
   };
 }
 
@@ -209,5 +215,130 @@ describe("the image of the Apps grid", () => {
     expect(svg.startsWith("<svg")).toBe(true);
     expect(svg).toContain('viewBox="0 0 64 64"');
     expect(existsSync(join(import.meta.dirname, "dist", "icon.svg"))).toBe(false);
+  });
+});
+
+describe("a presentation in a call", () => {
+  let core;
+  let element;
+  // In the page, not in a shadow root (Ionic's styles reach it since 1.0.2).
+  const inside = () => element;
+  const pdf = () => ({ name: "class.pdf", mime: "application/pdf", data: fixture("simple.pdf").toString("base64") });
+  const settle = async () => {
+    for (let at = 0; at < 20; at += 1) await tick();
+  };
+  const said = () => core.ft.live.send.mock.calls.map(([data]) => decode(data));
+  // happy-dom lays nothing out: three pages of 1000 px, one under the other.
+  const lay = () => {
+    for (const [at, sheet] of element.sheets.entries()) {
+      Object.defineProperty(sheet, "offsetTop", { value: 8 + at * 1000, configurable: true });
+      Object.defineProperty(sheet, "offsetHeight", { value: 1000, configurable: true });
+    }
+  };
+  const pages = () => inside().querySelector("[data-pages]");
+  const scrollTo = (top) => {
+    pages().scrollTop = top;
+    pages().dispatchEvent(new Event("scroll"));
+  };
+
+  beforeEach(() => {
+    core = fakeCore();
+    globalThis.ft = core.ft;
+    document.body.innerHTML = "";
+    element = document.createElement("ft-pdf-viewer");
+    document.body.append(element);
+  });
+
+  it("as the presenter, says the page it is on once the pages stop moving", async () => {
+    await core.open({ live: true, presenting: "lead", file: pdf() });
+    await settle();
+    lay();
+    vi.useFakeTimers();
+    try {
+      scrollTo(1400);
+      vi.advanceTimersByTime(PAGE_DELAY - 1);
+      expect(core.ft.live.send).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(said()).toEqual([{ k: PAGE, n: 2 }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("as the presenter, tells a follower that just opened where it is, at once", async () => {
+    await core.open({ live: true, presenting: "lead", file: pdf() });
+    await settle();
+    await core.hear({ k: HELLO });
+    expect(said()).toEqual([{ k: PAGE, n: 1 }]);
+  });
+
+  it("as a follower, says hello on opening and goes to each page the presenter shows", async () => {
+    await core.open({ live: true, presenting: "follow", file: pdf() });
+    await settle();
+    expect(said()).toEqual([{ k: HELLO }]);
+    lay();
+    await core.hear({ k: PAGE, n: 3 });
+    expect(pages().scrollTop).toBe(2000);
+    expect(inside().querySelector(":scope > ion-header > ion-toolbar > ion-title[data-count]").textContent).toBe("3 / 3");
+    await new Promise((resolve) => setTimeout(resolve, PAGE_DELAY + 50));
+    expect(said()).toEqual([{ k: HELLO }]);
+  });
+
+  it("keeps a page that arrives before the document is painted, and goes there once it is", async () => {
+    const going = vi.spyOn(element, "goToPage");
+    const opening = core.open({ live: true, presenting: "follow", file: pdf() });
+    await core.hear({ k: PAGE, n: 2 });
+    await opening;
+    await settle();
+    expect(going).toHaveBeenCalledWith(2);
+  });
+
+  it("goes no further than the first and the last page", async () => {
+    await core.open({ live: true, presenting: "follow", file: pdf() });
+    await settle();
+    lay();
+    element.goToPage(99);
+    expect(pages().scrollTop).toBe(2000);
+    element.goToPage(0);
+    expect(pages().scrollTop).toBe(0);
+  });
+
+  it("ignores what is not a page", async () => {
+    await core.open({ live: true, presenting: "follow", file: pdf() });
+    await settle();
+    lay();
+    for (const handler of core.heard) await handler("%%%");
+    await core.hear({ k: PAGE, n: "2" });
+    expect(pages().scrollTop).toBe(0);
+  });
+
+  it("says nothing on the live channel outside a presentation", async () => {
+    await core.open({ live: true, file: pdf() });
+    await settle();
+    lay();
+    await core.hear({ k: HELLO });
+    scrollTo(1400);
+    await new Promise((resolve) => setTimeout(resolve, PAGE_DELAY + 50));
+    expect(core.ft.live.send).not.toHaveBeenCalled();
+  });
+});
+
+describe("the manifest", () => {
+  const manifest = JSON.parse(readFileSync(join(import.meta.dirname, "module.json"), "utf8"));
+  const APP_LANGUAGES = ["es", "pt", "fr", "de", "it", "ro", "ru", "uk", "pl", "tr", "ar", "hi", "bn", "id", "vi", "th", "ja", "ko", "zh-CN", "zh-TW"];
+
+  it("asks to talk to its twin, needs the core that presents, and speaks the app's languages", () => {
+    expect(manifest.version).toBe("1.1.0");
+    expect(manifest.minCoreVersion).toBe("1.6.0");
+    expect(manifest.permissions).toEqual({ live: true });
+    expect(Object.keys(manifest.locales)).toEqual(APP_LANGUAGES);
+    for (const lang of APP_LANGUAGES) {
+      const { name, summary, ...rest } = manifest.locales[lang];
+      expect(rest, lang).toEqual({});
+      expect(name.trim(), lang).not.toBe("");
+      expect([...name].length, lang).toBeLessThanOrEqual(64);
+      expect(summary.trim(), lang).not.toBe("");
+      expect([...summary].length, lang).toBeLessThanOrEqual(200);
+    }
   });
 });

@@ -4,9 +4,10 @@
 leaving the app. Tapping a PDF in a conversation opens it here (the plugin is the *viewer* of
 `application/pdf`); "Open with" lists it too, and "Another app" is still one press away.
 
-Everything happens on the phone. The plugin has **no permission and asks for none**: no network,
-no sending, no storage. The bytes arrive from the app when the user taps; nothing of the document
-leaves the frame.
+Everything happens on the phone. The plugin asks for one permission, **`live`**, and uses it only
+when the app opens it inside a call to present (FlickerTalk 1.6.0): the presenter's viewer tells
+the other phone the page number it is on, and the other one follows. The document itself reaches
+the other phone as a normal file of the chat; no network, no sending, no storage.
 
 ## What it does
 
@@ -15,6 +16,9 @@ leaves the frame.
 - Pinch to zoom; a double tap toggles between fit-to-width and 2×. Pages are repainted at the
   new size once the fingers lift, within a pixel budget per canvas.
 - A `3 / 12` counter; the way out is the app's window.
+- In a call (FlickerTalk 1.6.0), the app can open it to present: the presenter's viewer says the
+  page it is on once its pages stop moving, and the other phone's viewer follows that page (its
+  counter too). Opened outside a presentation, it says nothing on the live channel.
 - Errors, with an icon and a text in the app's language: a broken file or none ("This PDF can't
   be opened") and a password-protected one ("This PDF is password protected").
 - Links inside the PDF are not followed. Dark mode follows the app.
@@ -47,10 +51,10 @@ node test/fixtures/make.mjs   # remakes the three test PDFs
 ```
 
 `dist/` is generated and **committed**: what the catalogue signs is `module.json` + `dist/`. A
-test keeps `dist/` under 4 MB. The plugin is heavy (about 3 MB), so it is not a seed: the app
-downloads it from the catalogue when the user turns it on. It needs FlickerTalk **1.6.0**
-(`minCoreVersion`), the first that lends Ionic to the plugin frame (`views` and the tap came with
-1.2.0): since 1.0.2 the counter sits in Ionic's `ion-header > ion-toolbar` and the pages in an
+test keeps `dist/` under 4 MB. Since app 1.6.0 every plugin travels inside the app as a seed, this
+one too; the catalogue only updates it. It needs FlickerTalk **1.6.0** (`minCoreVersion`), the
+version that lends Ionic to the plugin frame and opens it to present in a call (`views` and the tap
+came with 1.2.0): the counter sits in Ionic's `ion-header > ion-toolbar` and the pages in an
 `ion-content` that does not scroll (they scroll and zoom in their own box), so it looks like the rest
 of FlickerTalk. The package carries no Ionic (`@ionic/core` is only a devDependency, so the tests
 draw what the phone draws).
