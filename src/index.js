@@ -112,31 +112,30 @@ export function openDocument(bytes) {
 const escape = (text) =>
   String(text).replace(/[&<>"']/g, (one) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[one]);
 
+// Ionic draws the window (the app lends it to the frame, app 1.6.0): the header with the counter
+// and the content. This is only what is the viewer's own: the pages.
 const STYLE = `
-:host { display: flex; flex-direction: column; font: 14px system-ui, sans-serif; color: #111; --paper: #e9e9e9; --bar: rgba(255,255,255,.92); }
-:host([dark]) { color: #f4f4f4; --paper: #222; --bar: rgba(20,20,20,.92); }
-* { box-sizing: border-box; }
-.view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.bar { display: flex; gap: 6px; align-items: center; padding: 4px 6px; background: var(--bar); position: sticky; top: 0; z-index: 2; }
-.grow { flex: 1; }
-button { appearance: none; border: 0; background: transparent; color: inherit; min-width: 44px; height: 40px; border-radius: 10px; cursor: pointer; }
-.i { display: block; width: 22px; height: 22px; margin: auto; background: currentColor; -webkit-mask: var(--i) center/contain no-repeat; mask: var(--i) center/contain no-repeat; }
-.count { font-variant-numeric: tabular-nums; min-width: 60px; text-align: center; }
-.pages { flex: 1; overflow: auto; background: var(--paper); touch-action: pan-y; }
-.sheet { position: relative; margin: 8px auto; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
-.sheet canvas { display: block; width: 100%; height: 100%; }
-.state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; flex: 1; padding: 40px 16px; text-align: center; }
-.state .i { width: 48px; height: 48px; opacity: .8; }
+ft-pdf-viewer { display: flex; flex-direction: column; font: 14px system-ui, sans-serif; color: var(--ion-text-color, #111); --paper: #e9e9e9; }
+ft-pdf-viewer[dark] { color: var(--ion-text-color, #f4f4f4); --paper: #222; }
+ft-pdf-viewer * { box-sizing: border-box; }
+ft-pdf-viewer ion-content { flex: 1; }
+ft-pdf-viewer .view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+ft-pdf-viewer .i { display: block; width: 22px; height: 22px; margin: auto; background: currentColor; -webkit-mask: var(--i) center/contain no-repeat; mask: var(--i) center/contain no-repeat; }
+ft-pdf-viewer .count { font-variant-numeric: tabular-nums; }
+ft-pdf-viewer .pages { flex: 1; overflow: auto; background: var(--paper); touch-action: pan-y; }
+ft-pdf-viewer .sheet { position: relative; margin: 8px auto; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+ft-pdf-viewer .sheet canvas { display: block; width: 100%; height: 100%; }
+ft-pdf-viewer .state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; flex: 1; padding: 40px 16px; text-align: center; }
+ft-pdf-viewer .state .i { width: 48px; height: 48px; opacity: .8; }
 `;
 
-const icon = (name) => `<i class="i" style="--i:url(./icon/${name}.svg)"></i>`;
+const icon = (name) => `<i class="i" style="--i:url(./icon/${name}.svg)" aria-hidden="true"></i>`;
 
 /** The viewer: the pages in a column, painted as they come near; a counter; zoom by pinch and
- *  double tap; ✕ to close. */
+ *  double tap. The way out is the app's window. */
 class PdfViewer extends HTMLElement {
   constructor() {
     super();
-    this.root = this.attachShadow({ mode: "open" });
     this.lang = "en";
     this.document = null;
     this.pages = [];
@@ -152,9 +151,9 @@ class PdfViewer extends HTMLElement {
 
   connectedCallback() {
     this.style.height = `${Math.max(480, (globalThis.screen?.availHeight ?? 800) - 150)}px`;
-    this.root.innerHTML = `<style>${STYLE}</style><div class="view"></div>`;
-    this.view = this.root.querySelector(".view");
-    this.root.addEventListener("click", (event) => this.onClick(event));
+    // In the page, not in a shadow root: the frame holds only this viewer, and Ionic's global
+    // styles do not cross a shadow boundary. Each screen is its own header and content.
+    this.view = this;
     globalThis.ft?.onOpen?.((opening) => this.onOpen(opening));
     this.paint();
   }
@@ -183,29 +182,25 @@ class PdfViewer extends HTMLElement {
     }
   }
 
-  onClick(event) {
-    const button = event.target.closest("button");
-    if (!button) return;
-    if (button.dataset.act === "close") globalThis.ft.close();
-  }
-
   paint() {
     const T = (key) => t(this.lang, key);
     if (this.state !== "ready") {
       const name = this.state === "locked" ? "lock-closed-outline" : this.state === "loading" ? "time-outline" : "warning-outline";
       const text = this.state === "locked" ? T("locked") : this.state === "loading" ? T("loading") : T("broken");
-      this.view.innerHTML = `
-        <div class="bar"><span class="grow"></span><button data-act="close" aria-label="${escape(T("close"))}">${icon("close-outline")}</button></div>
-        <div class="state" role="${this.state === "loading" ? "status" : "alert"}">${icon(name)}<p>${escape(text)}</p></div>`;
+      this.view.innerHTML = `<style>${STYLE}</style>
+        <ion-content><div class="view">
+        <div class="state" role="${this.state === "loading" ? "status" : "alert"}">${icon(name)}<p>${escape(text)}</p></div>
+        </div></ion-content>`;
       return;
     }
-    this.view.innerHTML = `
-      <div class="bar">
-        <span class="count" aria-label="${escape(T("page"))}" data-count>1 / ${this.pages.length}</span>
-        <span class="grow"></span>
-        <button data-act="close" aria-label="${escape(T("close"))}">${icon("close-outline")}</button>
-      </div>
-      <div class="pages" data-pages>${this.pages.map((_, at) => `<div class="sheet" data-page="${at}"></div>`).join("")}</div>`;
+    // The pages scroll and zoom in their own box: the content does not scroll.
+    this.view.innerHTML = `<style>${STYLE}</style>
+      <ion-header><ion-toolbar>
+        <ion-title class="count" aria-label="${escape(T("page"))}" data-count>1 / ${this.pages.length}</ion-title>
+      </ion-toolbar></ion-header>
+      <ion-content scroll-y="false"><div class="view">
+      <div class="pages" data-pages>${this.pages.map((_, at) => `<div class="sheet" data-page="${at}"></div>`).join("")}</div>
+      </div></ion-content>`;
     const pages = this.view.querySelector("[data-pages]");
     pages.addEventListener("scroll", () => this.onScroll());
     pages.addEventListener("pointerdown", (event) => this.onPointerDown(event));
