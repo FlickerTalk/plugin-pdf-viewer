@@ -94,7 +94,8 @@ function fakeCore() {
 describe("the view", () => {
   let core;
   let element;
-  const inside = () => element.shadowRoot;
+  // In the page, not in a shadow root: Ionic's global styles do not cross a shadow boundary.
+  const inside = () => element;
   const settle = async () => {
     for (let at = 0; at < 20; at += 1) await tick();
   };
@@ -113,9 +114,31 @@ describe("the view", () => {
     expect(element.state).toBe("ready");
     expect(inside().querySelectorAll(".sheet")).toHaveLength(3);
     expect(inside().querySelector("[data-count]").textContent).toBe("1 / 3");
-    expect(inside().querySelector('[data-act="close"]').getAttribute("aria-label")).toBe("Cerrar");
-    inside().querySelector('[data-act="close"]').click();
-    expect(core.ft.close).toHaveBeenCalled();
+    // The app's window has the way out.
+    expect(inside().querySelector('[data-act="close"]')).toBeNull();
+  });
+
+  it("asks for an app that lends Ionic", () => {
+    expect(JSON.parse(readFileSync(join(import.meta.dirname, "module.json"), "utf8")).minCoreVersion).toBe("1.6.0");
+  });
+
+  it("draws in the page: the counter in Ionic's header, the pages in a content that does not scroll", async () => {
+    await core.open({ file: { name: "menu.pdf", mime: "application/pdf", data: fixture("simple.pdf").toString("base64") } });
+    await settle();
+    expect(element.shadowRoot).toBe(null);
+    const count = element.querySelector(":scope > ion-header > ion-toolbar > ion-title[data-count]");
+    expect(count.textContent).toBe("1 / 3");
+    expect(count.getAttribute("aria-label")).toBe("Page");
+    const content = element.querySelector(":scope > ion-content");
+    expect(content.getAttribute("scroll-y")).toBe("false");
+    expect(content.querySelectorAll("[data-pages] .sheet")).toHaveLength(3);
+  });
+
+  it("says what is wrong in Ionic's content, with no bar of its own", async () => {
+    await core.open({ file: null });
+    await settle();
+    expect(element.querySelector(":scope > ion-header")).toBeNull();
+    expect(element.querySelector(":scope > ion-content [role=alert]").textContent).toContain("can't be opened");
   });
 
   // Found on the Lenovo (2026-09-28): the tap that zooms repaints, the canvas under the finger
@@ -162,6 +185,15 @@ describe("the view", () => {
     await core.open({ file: null });
     await settle();
     expect(inside().querySelector("[role=alert]").textContent).toContain("can't be opened");
+  });
+});
+
+describe("the package", () => {
+  // Ionic is the app's, lent to the frame: a copy in the package would be a second one, and heavy.
+  it("carries no Ionic of its own", () => {
+    const code = readFileSync(join(import.meta.dirname, "dist", "index.js"), "utf8");
+    expect(code).not.toMatch(/@ionic\/core|ionicframework|stencil|defineCustomElement|__registerHost/i);
+    expect(code).not.toMatch(/^\s*import\s.*from\s+["'](?!\.\/)/m);
   });
 });
 
