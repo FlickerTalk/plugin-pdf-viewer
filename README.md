@@ -7,7 +7,8 @@ leaving the app. Tapping a PDF in a conversation opens it here (the plugin is th
 Everything happens on the phone. The plugin asks for one permission, **`live`**, and uses it only
 when the app opens it inside a call to present (FlickerTalk 1.6.0): the presenter's viewer tells
 the other phone the page number it is on, and the other one follows. The document itself reaches
-the other phone as a normal file of the chat; no network, no sending, no storage.
+the other phone as a normal file of the chat; no network and no sending. The only thing it keeps
+is the presenter's place (the document's name and size, and its page) in its own plugin memory.
 
 ## What it does
 
@@ -19,6 +20,9 @@ the other phone as a normal file of the chat; no network, no sending, no storage
 - In a call (FlickerTalk 1.6.0), the app can open it to present: the presenter's viewer says the
   page it is on once its pages stop moving, and the other phone's viewer follows that page (its
   counter too). Opened outside a presentation, it says nothing on the live channel.
+- The presenter keeps its place: leaving the call screen closes the viewer, and when the presenter
+  comes back it opens the same document at the page it was on and tells the other phone that page,
+  instead of starting again at the first one (1.1.1).
 - Errors, with an icon and a text in the app's language: a broken file or none ("This PDF can't
   be opened") and a password-protected one ("This PDF is password protected").
 - Links inside the PDF are not followed. Dark mode follows the app.

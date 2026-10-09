@@ -1,7 +1,7 @@
 {
   "id": "com.flickertalk.pdfviewer",
   "name": "PDF viewer",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "icon": "book-outline",
   "minCoreVersion": "1.6.0",
   "components": ["ft-pdf-viewer"],
