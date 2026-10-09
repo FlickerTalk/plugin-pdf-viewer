@@ -1,12 +1,15 @@
 // A PDF viewer for FlickerTalk (document viewer, 2026-09-27): read a PDF sent in a chat without
 // leaving the app. It runs inside the plugin frame's policy as it is: no worker (pdf.js works on
 // the main thread), no eval, no fetch (the bytes come in `onOpen`, the standard fonts from the
-// package), no wasm. It has no permission and asks for none: nothing of the document leaves.
+// package), no wasm. It asks only for `live`, used only inside a call (Plugin API 1.6.0): the
+// presenter tells its twin the page it is on, never the document, which reaches the other phone as
+// a file of the chat.
 
 // The legacy build carries the polyfills pdf.js needs on a WebView a year old (`Map.prototype.getOrInsertComputed`…).
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import * as worker from "pdfjs-dist/legacy/build/pdf.worker.mjs";
 import { t } from "./i18n.js";
+import { HELLO, PAGE, decode, encode } from "./live.js";
 
 // The "fake worker": pdf.js finds the worker's code here and runs it in this thread, since the
 // frame may not start a Worker (`child-src 'none'`).
@@ -18,6 +21,8 @@ const NEAR = 1.5;
 export const CANVAS_PIXELS = 16 * 1024 * 1024;
 export const MIN_ZOOM = 0.5;
 export const MAX_ZOOM = 4;
+/** How long the presenter's pages must rest before the page is said: a fling says one page. */
+export const PAGE_DELAY = 300;
 
 /**
  * What a document needs from the package, without the network: the standard fonts. It is what
@@ -147,6 +152,9 @@ class PdfViewer extends HTMLElement {
     this.pinch = null;
     this.lastTap = 0;
     this.repaint = null;
+    this.presenting = null;
+    this.wanted = 0;
+    this.pageTimer = null;
   }
 
   connectedCallback() {
@@ -155,12 +163,17 @@ class PdfViewer extends HTMLElement {
     // styles do not cross a shadow boundary. Each screen is its own header and content.
     this.view = this;
     globalThis.ft?.onOpen?.((opening) => this.onOpen(opening));
+    globalThis.ft?.live?.onMessage?.((data) => this.onLive(data));
     this.paint();
   }
 
   async onOpen(opening) {
     this.lang = opening.lang || "en";
     if (opening.dark) this.setAttribute("dark", "");
+    // Opened by the app in a call (1.6.0), with the live channel: lead or follow the presenter.
+    const role = opening.presenting;
+    this.presenting = opening.live && (role === "lead" || role === "follow") ? role : null;
+    if (this.presenting === "follow") void globalThis.ft.live.send(encode({ k: HELLO }));
     if (!opening.file || !opening.file.data) {
       this.state = "broken";
       return this.paint();
@@ -176,6 +189,11 @@ class PdfViewer extends HTMLElement {
       this.state = "ready";
       this.paint();
       this.layout();
+      if (this.wanted) {
+        const page = this.wanted;
+        this.wanted = 0;
+        this.goToPage(page);
+      }
     } catch (error) {
       this.state = failureOf(error);
       this.paint();
@@ -246,6 +264,7 @@ class PdfViewer extends HTMLElement {
       this.current = current;
       const count = this.view.querySelector("[data-count]");
       if (count) count.textContent = `${current + 1} / ${this.pages.length}`;
+      this.pageChanged();
     }
   }
 
@@ -336,6 +355,41 @@ class PdfViewer extends HTMLElement {
   setZoom(zoom) {
     this.zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
     this.layout();
+  }
+
+  // ---- A presentation in a call (1.6.0) ----
+
+  /** The presenter's page moved: said once it rests for PAGE_DELAY. */
+  pageChanged() {
+    if (this.presenting !== "lead") return;
+    clearTimeout(this.pageTimer);
+    this.pageTimer = setTimeout(() => this.sayPage(), PAGE_DELAY);
+  }
+
+  sayPage() {
+    clearTimeout(this.pageTimer);
+    this.pageTimer = null;
+    if (this.presenting !== "lead" || this.state !== "ready") return;
+    void globalThis.ft.live.send(encode({ k: PAGE, n: this.current + 1 }));
+  }
+
+  /** What the twin said: a follower's hello (lead), or the presenter's page (follow). */
+  onLive(data) {
+    const message = decode(data);
+    if (!message || !this.presenting) return;
+    if (message.k === HELLO && this.presenting === "lead") return this.sayPage();
+    if (message.k !== PAGE || this.presenting !== "follow") return;
+    if (this.state === "ready" && this.sheets?.length) this.goToPage(message.n);
+    else this.wanted = message.n;
+  }
+
+  /** Puts page `n` (from 1) at the top of the screen; past either end, the first or the last. */
+  goToPage(n) {
+    const pages = this.view.querySelector("[data-pages]");
+    if (!pages || !this.sheets?.length) return;
+    const at = Math.min(this.sheets.length, Math.max(1, Math.round(n))) - 1;
+    pages.scrollTop = this.sheets[at].offsetTop - this.sheets[0].offsetTop;
+    this.onScroll();
   }
 }
 

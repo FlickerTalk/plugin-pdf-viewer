@@ -1,18 +1,34 @@
 {
   "id": "com.flickertalk.pdfviewer",
   "name": "PDF viewer",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "icon": "book-outline",
   "minCoreVersion": "1.6.0",
-  "components": [
-    "ft-pdf-viewer"
-  ],
-  "opens": [
-    "application/pdf"
-  ],
-  "views": [
-    "application/pdf"
-  ],
-  "permissions": {},
-  "summary": "Read PDFs sent in a chat without leaving the app."
+  "components": ["ft-pdf-viewer"],
+  "opens": ["application/pdf"],
+  "views": ["application/pdf"],
+  "permissions": { "live": true },
+  "summary": "Read the PDFs of a chat without leaving the app, and follow a presentation page by page during a call.",
+  "locales": {
+    "es": { "name": "Visor de PDF", "summary": "Lee los PDF de un chat sin salir de la app y sigue una presentación página a página durante una llamada." },
+    "pt": { "name": "Visualizador de PDF", "summary": "Leia os PDFs de uma conversa sem sair do app e acompanhe uma apresentação página por página durante uma chamada." },
+    "fr": { "name": "Lecteur PDF", "summary": "Lisez les PDF d’une conversation sans quitter l’app et suivez une présentation page par page pendant un appel." },
+    "de": { "name": "PDF-Viewer", "summary": "Lies die PDFs eines Chats, ohne die App zu verlassen, und folge einer Präsentation Seite für Seite während eines Anrufs." },
+    "it": { "name": "Visualizzatore PDF", "summary": "Leggi i PDF di una chat senza uscire dall’app e segui una presentazione pagina per pagina durante una chiamata." },
+    "ro": { "name": "Vizualizator PDF", "summary": "Citește PDF-urile unei conversații fără să ieși din aplicație și urmărește o prezentare pagină cu pagină în timpul unui apel." },
+    "ru": { "name": "Просмотр PDF", "summary": "Читайте PDF из чата, не выходя из приложения, и следите за презентацией страница за страницей во время звонка." },
+    "uk": { "name": "Перегляд PDF", "summary": "Читайте PDF із чату, не виходячи із застосунку, і стежте за презентацією сторінка за сторінкою під час дзвінка." },
+    "pl": { "name": "Przeglądarka PDF", "summary": "Czytaj pliki PDF z czatu bez wychodzenia z aplikacji i śledź prezentację strona po stronie podczas rozmowy." },
+    "tr": { "name": "PDF görüntüleyici", "summary": "Bir sohbetteki PDF'leri uygulamadan çıkmadan okuyun ve bir arama sırasında sunumu sayfa sayfa takip edin." },
+    "ar": { "name": "عارض PDF", "summary": "اقرأ ملفات PDF في المحادثة دون مغادرة التطبيق، وتابِع عرضًا تقديميًا صفحةً بصفحة أثناء المكالمة." },
+    "hi": { "name": "PDF व्यूअर", "summary": "ऐप छोड़े बिना चैट की PDF पढ़ें, और कॉल के दौरान प्रस्तुति को पेज-दर-पेज देखें।" },
+    "bn": { "name": "PDF ভিউয়ার", "summary": "অ্যাপ না ছেড়েই চ্যাটের PDF পড়ুন, আর কলের সময় উপস্থাপনা পাতায় পাতায় অনুসরণ করুন।" },
+    "id": { "name": "Penampil PDF", "summary": "Baca PDF dari obrolan tanpa keluar dari aplikasi, dan ikuti presentasi halaman demi halaman saat panggilan." },
+    "vi": { "name": "Trình xem PDF", "summary": "Đọc các tệp PDF trong cuộc trò chuyện mà không rời ứng dụng, và theo dõi bài trình bày từng trang trong cuộc gọi." },
+    "th": { "name": "ตัวดู PDF", "summary": "อ่าน PDF ในแชตได้โดยไม่ต้องออกจากแอป และติดตามการนำเสนอทีละหน้าระหว่างการโทร" },
+    "ja": { "name": "PDF ビューア", "summary": "アプリを離れずにチャットの PDF を読み、通話中は発表をページごとに追えます。" },
+    "ko": { "name": "PDF 뷰어", "summary": "앱을 나가지 않고 채팅의 PDF를 읽고, 통화 중에는 발표를 한 페이지씩 따라가세요." },
+    "zh-CN": { "name": "PDF 查看器", "summary": "无需离开应用即可阅读聊天中的 PDF，并在通话中逐页跟随演示。" },
+    "zh-TW": { "name": "PDF 檢視器", "summary": "不必離開應用程式就能閱讀聊天中的 PDF，並在通話中逐頁跟著簡報。" }
+  }
 }
