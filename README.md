@@ -14,7 +14,7 @@ leaves the frame.
   near the screen, and let go when it moves away, so a long PDF does not exhaust a phone.
 - Pinch to zoom; a double tap toggles between fit-to-width and 2×. Pages are repainted at the
   new size once the fingers lift, within a pixel budget per canvas.
-- A `3 / 12` counter and a ✕ that closes the plugin.
+- A `3 / 12` counter; the way out is the app's window.
 - Errors, with an icon and a text in the app's language: a broken file or none ("This PDF can't
   be opened") and a password-protected one ("This PDF is password protected").
 - Links inside the PDF are not followed. Dark mode follows the app.
@@ -48,8 +48,12 @@ node test/fixtures/make.mjs   # remakes the three test PDFs
 
 `dist/` is generated and **committed**: what the catalogue signs is `module.json` + `dist/`. A
 test keeps `dist/` under 4 MB. The plugin is heavy (about 3 MB), so it is not a seed: the app
-downloads it from the catalogue when the user turns it on. It needs FlickerTalk **1.2.0**
-(`minCoreVersion`), the version that brought `views` and the tap.
+downloads it from the catalogue when the user turns it on. It needs FlickerTalk **1.6.0**
+(`minCoreVersion`), the first that lends Ionic to the plugin frame (`views` and the tap came with
+1.2.0): since 1.0.2 the counter sits in Ionic's `ion-header > ion-toolbar` and the pages in an
+`ion-content` that does not scroll (they scroll and zoom in their own box), so it looks like the rest
+of FlickerTalk. The package carries no Ionic (`@ionic/core` is only a devDependency, so the tests
+draw what the phone draws).
 
 Licenses of what is inside: pdf.js (Apache-2.0), with its standard fonts (Foxit, Liberation:
 see `node_modules/pdfjs-dist/standard_fonts/LICENSE_*`).
