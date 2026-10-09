@@ -3,7 +3,8 @@
 // the main thread), no eval, no fetch (the bytes come in `onOpen`, the standard fonts from the
 // package), no wasm. It asks only for `live`, used only inside a call (Plugin API 1.6.0): the
 // presenter tells its twin the page it is on, never the document, which reaches the other phone as
-// a file of the chat.
+// a file of the chat. The presenter's viewer remembers its page in its own memory (`ft.store`):
+// the app closes it when the call screen is left, and on return it opens where it was.
 
 // The legacy build carries the polyfills pdf.js needs on a WebView a year old (`Map.prototype.getOrInsertComputed`…).
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
@@ -23,6 +24,24 @@ export const MIN_ZOOM = 0.5;
 export const MAX_ZOOM = 4;
 /** How long the presenter's pages must rest before the page is said: a fling says one page. */
 export const PAGE_DELAY = 300;
+/** The one key of the presenter's memory: the last document it presented and its page. One key,
+ *  not one per document, because the core keeps at most 64 short keys for a plugin. */
+export const PRESENTED = "present";
+
+/** Which document is presented, as the presenter remembers it: its name and its size. */
+export function documentKey(file, bytes) {
+  return `${bytes.length}:${String(file?.name ?? "")}`;
+}
+
+/** The page the presenter was on in `document`, from its memory; 0 when it never presented it. */
+export function rememberedPage(value, document) {
+  try {
+    const memory = JSON.parse(value);
+    return memory?.doc === document && Number.isInteger(memory.page) && memory.page >= 1 ? memory.page : 0;
+  } catch {
+    return 0;
+  }
+}
 
 /**
  * What a document needs from the package, without the network: the standard fonts. It is what
@@ -155,6 +174,8 @@ class PdfViewer extends HTMLElement {
     this.presenting = null;
     this.wanted = 0;
     this.pageTimer = null;
+    this.documentKey = null;
+    this.keptPage = 0;
   }
 
   connectedCallback() {
@@ -179,16 +200,26 @@ class PdfViewer extends HTMLElement {
       return this.paint();
     }
     try {
-      this.document = await openDocument(fromBase64(opening.file.data));
+      const bytes = fromBase64(opening.file.data);
+      // The presenter opened again (the call screen left and back): where it was, read before the
+      // pages are ready so that nothing is said from the first page meanwhile.
+      const resumed = this.presenting === "lead" ? this.remembered(documentKey(opening.file, bytes)) : Promise.resolve(0);
+      this.document = await openDocument(bytes);
       this.pages = [];
       for (let number = 1; number <= this.document.numPages; number += 1) {
         const page = await this.document.getPage(number);
         const { width, height } = page.getViewport({ scale: 1 });
         this.pages.push({ page, width, height });
       }
+      const page = await resumed;
       this.state = "ready";
       this.paint();
       this.layout();
+      if (page) {
+        this.keptPage = page;
+        this.goToPage(page);
+        this.sayPage();
+      }
       if (this.wanted) {
         const page = this.wanted;
         this.wanted = 0;
@@ -359,6 +390,23 @@ class PdfViewer extends HTMLElement {
 
   // ---- A presentation in a call (1.6.0) ----
 
+  /** The presenter's page in this document from its memory, 0 if none; it now keeps this one. */
+  async remembered(key) {
+    this.documentKey = key;
+    try {
+      return rememberedPage(await globalThis.ft?.store?.get?.(PRESENTED), key);
+    } catch {
+      return 0;
+    }
+  }
+
+  /** The presenter keeps the page it said, so that it opens there again. */
+  keepPage(page) {
+    if (!this.documentKey || page === this.keptPage) return;
+    this.keptPage = page;
+    globalThis.ft?.store?.set?.(PRESENTED, JSON.stringify({ doc: this.documentKey, page }))?.catch?.(() => {});
+  }
+
   /** The presenter's page moved: said once it rests for PAGE_DELAY. */
   pageChanged() {
     if (this.presenting !== "lead") return;
@@ -371,6 +419,7 @@ class PdfViewer extends HTMLElement {
     this.pageTimer = null;
     if (this.presenting !== "lead" || this.state !== "ready") return;
     void globalThis.ft.live.send(encode({ k: PAGE, n: this.current + 1 }));
+    this.keepPage(this.current + 1);
   }
 
   /** What the twin said: a follower's hello (lead), or the presenter's page (follow). */

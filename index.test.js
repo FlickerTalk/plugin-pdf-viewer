@@ -3,7 +3,7 @@
 // broken file; the 21 languages; and the size of what the catalogue would sign.
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CANVAS_PIXELS, PAGE_DELAY, currentPage, failureOf, fitScale, fromBase64, nearPages, openDocument, ratioFor, toggledZoom } from "./src/index.js";
 import { HELLO, PAGE, decode, encode } from "./src/live.js";
 import { LANGUAGES, catalogueOf, t } from "./src/i18n.js";
@@ -83,17 +83,28 @@ describe("the catalogue and the package", () => {
   });
 });
 
-/** A fake core: it hands the file over, hears the close, and carries the live channel. */
-function fakeCore() {
+/** A fake core: it hands the file over, hears the close, carries the live channel, and keeps the
+ *  plugin's memory (`ft.store`), which outlives one opening when it is passed to the next core. */
+function fakeCore(memory = new Map()) {
   const handlers = [];
   const heard = [];
   return {
     heard,
+    memory,
     open: (opening) => Promise.all(handlers.map((handler) => handler({ text: "", dark: false, lang: "en", file: null, ref: null, reminder: null, live: false, ...opening }))),
     hear: async (message) => {
       for (const handler of heard) await handler(encode(message));
     },
-    ft: { onOpen: (handler) => handlers.push(handler), close: vi.fn(), live: { send: vi.fn(async () => true), onMessage: (handler) => heard.push(handler) } },
+    ft: {
+      onOpen: (handler) => handlers.push(handler),
+      close: vi.fn(),
+      live: { send: vi.fn(async () => true), onMessage: (handler) => heard.push(handler) },
+      store: {
+        get: vi.fn(async (key) => memory.get(key) ?? null),
+        set: vi.fn(async (key, value) => (memory.set(key, value), true)),
+        forget: vi.fn(async (key) => memory.delete(key)),
+      },
+    },
   };
 }
 
@@ -312,6 +323,79 @@ describe("a presentation in a call", () => {
     expect(pages().scrollTop).toBe(0);
   });
 
+  describe("after the presenter's viewer is closed and opened again (the call screen left and back)", () => {
+    // happy-dom lays nothing out, and a reopened viewer goes to its page while it opens: every
+    // sheet is laid out from the start, three pages of 1000 px.
+    const prototype = HTMLElement.prototype;
+    const saved = {};
+    beforeEach(() => {
+      for (const name of ["offsetTop", "offsetHeight"]) saved[name] = Object.getOwnPropertyDescriptor(prototype, name);
+      const page = (sheet) => (sheet.classList?.contains("sheet") ? Number(sheet.dataset.page) : null);
+      Object.defineProperty(prototype, "offsetTop", { configurable: true, get() { const at = page(this); return at === null ? 0 : 8 + at * 1000; } });
+      Object.defineProperty(prototype, "offsetHeight", { configurable: true, get() { return page(this) === null ? 0 : 1000; } });
+    });
+    afterEach(() => {
+      for (const [name, descriptor] of Object.entries(saved)) Object.defineProperty(prototype, name, descriptor);
+    });
+
+    /** The same viewer opened again, as the app does on return: a new element, the same memory. */
+    const reopen = async (opening) => {
+      core = fakeCore(core.memory);
+      globalThis.ft = core.ft;
+      document.body.innerHTML = "";
+      element = document.createElement("ft-pdf-viewer");
+      document.body.append(element);
+      const going = vi.spyOn(element, "goToPage");
+      await core.open(opening);
+      await settle();
+      return going;
+    };
+
+    it("goes back to the page it was on before saying anything, then says that page", async () => {
+      await core.open({ live: true, presenting: "lead", file: pdf() });
+      await settle();
+      scrollTo(2000);
+      await new Promise((resolve) => setTimeout(resolve, PAGE_DELAY + 50));
+      expect(said()).toEqual([{ k: PAGE, n: 3 }]);
+
+      const going = await reopen({ live: true, presenting: "lead", file: pdf() });
+      expect(going).toHaveBeenCalledWith(3);
+      expect(said()).toEqual([{ k: PAGE, n: 3 }]);
+      expect(going.mock.invocationCallOrder[0]).toBeLessThan(core.ft.live.send.mock.invocationCallOrder[0]);
+      expect(pages().scrollTop).toBe(2000);
+      expect(inside().querySelector("[data-count]").textContent).toBe("3 / 3");
+      // A follower that opens again later hears the same page, not the first one.
+      await core.hear({ k: HELLO });
+      expect(said()).toEqual([{ k: PAGE, n: 3 }, { k: PAGE, n: 3 }]);
+    });
+
+    it("opens a document it never presented at the first page, and says nothing until it moves", async () => {
+      await core.open({ live: true, presenting: "lead", file: pdf() });
+      await settle();
+      scrollTo(2000);
+      await new Promise((resolve) => setTimeout(resolve, PAGE_DELAY + 50));
+
+      const other = { ...pdf(), name: "another.pdf" };
+      const going = await reopen({ live: true, presenting: "lead", file: other });
+      expect(going).not.toHaveBeenCalled();
+      expect(pages().scrollTop).toBe(0);
+      expect(core.ft.live.send).not.toHaveBeenCalled();
+    });
+
+    it("leaves a follower to the presenter: it neither keeps nor restores a page of its own", async () => {
+      await core.open({ live: true, presenting: "lead", file: pdf() });
+      await settle();
+      scrollTo(2000);
+      await new Promise((resolve) => setTimeout(resolve, PAGE_DELAY + 50));
+
+      const going = await reopen({ live: true, presenting: "follow", file: pdf() });
+      expect(going).not.toHaveBeenCalled();
+      expect(said()).toEqual([{ k: HELLO }]);
+      await core.hear({ k: PAGE, n: 2 });
+      expect(core.ft.store.set).not.toHaveBeenCalled();
+    });
+  });
+
   it("says nothing on the live channel outside a presentation", async () => {
     await core.open({ live: true, file: pdf() });
     await settle();
@@ -328,7 +412,7 @@ describe("the manifest", () => {
   const APP_LANGUAGES = ["es", "pt", "fr", "de", "it", "ro", "ru", "uk", "pl", "tr", "ar", "hi", "bn", "id", "vi", "th", "ja", "ko", "zh-CN", "zh-TW"];
 
   it("asks to talk to its twin, needs the core that presents, and speaks the app's languages", () => {
-    expect(manifest.version).toBe("1.1.0");
+    expect(manifest.version).toBe("1.1.1");
     expect(manifest.minCoreVersion).toBe("1.6.0");
     expect(manifest.permissions).toEqual({ live: true });
     expect(Object.keys(manifest.locales)).toEqual(APP_LANGUAGES);
