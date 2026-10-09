@@ -151,6 +151,45 @@ describe("the view", () => {
     expect(content.querySelectorAll("[data-pages] .sheet")).toHaveLength(3);
   });
 
+  // Found on the phones (2026-10-09): presenting in a call, the frame fills the area above the
+  // call's buttons (`<html data-fill>`), but the viewer took its height from the screen and the
+  // bottom of the last page fell under the frame's edge.
+  describe("its height", () => {
+    const root = document.documentElement;
+    afterEach(() => delete root.dataset.fill);
+    const fresh = () => {
+      document.body.innerHTML = "";
+      element = document.createElement("ft-pdf-viewer");
+      document.body.append(element);
+    };
+    const screenHeight = () => `${Math.max(480, (globalThis.screen?.availHeight ?? 800) - 150)}px`;
+
+    it("in a frame that fills its window, is exactly the frame's height, never one from the screen", async () => {
+      root.dataset.fill = "1";
+      fresh();
+      expect(element.style.height).toBe("100%");
+      await core.open({ file: { name: "menu.pdf", mime: "application/pdf", data: fixture("simple.pdf").toString("base64") } });
+      await settle();
+      expect(element.style.height).toBe("100%");
+      expect(element.style.height).not.toBe(screenHeight());
+    });
+
+    it("fills the frame even when the frame said so only when it opened the viewer", async () => {
+      fresh();
+      root.dataset.fill = "1";
+      await core.open({ file: { name: "menu.pdf", mime: "application/pdf", data: fixture("simple.pdf").toString("base64") } });
+      await settle();
+      expect(element.style.height).toBe("100%");
+    });
+
+    it("elsewhere, keeps the height it takes from the screen", async () => {
+      fresh();
+      await core.open({ file: { name: "menu.pdf", mime: "application/pdf", data: fixture("simple.pdf").toString("base64") } });
+      await settle();
+      expect(element.style.height).toBe(screenHeight());
+    });
+  });
+
   it("says what is wrong in Ionic's content, with no bar of its own", async () => {
     await core.open({ file: null });
     await settle();
@@ -328,10 +367,13 @@ describe("a presentation in a call", () => {
     // sheet is laid out from the start, three pages of 1000 px.
     const prototype = HTMLElement.prototype;
     const saved = {};
+    /** Whether the WebView has laid the sheets out yet: until then every one is at the top. */
+    let laidOut = true;
     beforeEach(() => {
       for (const name of ["offsetTop", "offsetHeight"]) saved[name] = Object.getOwnPropertyDescriptor(prototype, name);
+      laidOut = true;
       const page = (sheet) => (sheet.classList?.contains("sheet") ? Number(sheet.dataset.page) : null);
-      Object.defineProperty(prototype, "offsetTop", { configurable: true, get() { const at = page(this); return at === null ? 0 : 8 + at * 1000; } });
+      Object.defineProperty(prototype, "offsetTop", { configurable: true, get() { const at = page(this); return at === null || !laidOut ? 0 : 8 + at * 1000; } });
       Object.defineProperty(prototype, "offsetHeight", { configurable: true, get() { return page(this) === null ? 0 : 1000; } });
     });
     afterEach(() => {
@@ -367,6 +409,81 @@ describe("a presentation in a call", () => {
       // A follower that opens again later hears the same page, not the first one.
       await core.hear({ k: HELLO });
       expect(said()).toEqual([{ k: PAGE, n: 3 }, { k: PAGE, n: 3 }]);
+    });
+
+    // Found on the Lenovo (2026-10-09): reopened at page 3, the presenter said and kept page 1,
+    // because the WebView had not laid the pages out yet when it jumped, and the page it said was
+    // read from where the pages were (still the top).
+    it("says and keeps the page it was on even when the pages are still at the top, and lands there once they are laid out", async () => {
+      await core.open({ live: true, presenting: "lead", file: pdf() });
+      await settle();
+      scrollTo(2000);
+      await new Promise((resolve) => setTimeout(resolve, PAGE_DELAY + 50));
+      const kept = core.memory.get("present");
+      expect(JSON.parse(kept).page).toBe(3);
+
+      // Not laid out yet: every sheet is at the top, so the jump leaves the pages where they are.
+      laidOut = false;
+      await reopen({ live: true, presenting: "lead", file: pdf() });
+      expect(said()).toEqual([{ k: PAGE, n: 3 }]);
+      // The pages report the first page meanwhile; nothing says or keeps it.
+      scrollTo(0);
+      await new Promise((resolve) => setTimeout(resolve, PAGE_DELAY + 50));
+      await core.hear({ k: HELLO });
+      expect(said()).toEqual([{ k: PAGE, n: 3 }, { k: PAGE, n: 3 }]);
+      expect(core.memory.get("present")).toBe(kept);
+
+      // Laid out: the viewer goes to its page by itself.
+      laidOut = true;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(pages().scrollTop).toBe(2000);
+      expect(inside().querySelector("[data-count]").textContent).toBe("3 / 3");
+      expect(core.memory.get("present")).toBe(kept);
+
+      // From then on the presenter's own moves are said and kept as before.
+      pages().dispatchEvent(new PointerEvent("pointerdown", { pointerId: 1, isPrimary: true }));
+      scrollTo(1000);
+      await new Promise((resolve) => setTimeout(resolve, PAGE_DELAY + 50));
+      expect(said().at(-1)).toEqual({ k: PAGE, n: 2 });
+      expect(JSON.parse(core.memory.get("present")).page).toBe(2);
+    });
+
+    it("once the presenter touches the pages, says where they are, not the page it was going to", async () => {
+      await core.open({ live: true, presenting: "lead", file: pdf() });
+      await settle();
+      scrollTo(2000);
+      await new Promise((resolve) => setTimeout(resolve, PAGE_DELAY + 50));
+
+      laidOut = false;
+      await reopen({ live: true, presenting: "lead", file: pdf() });
+      pages().dispatchEvent(new PointerEvent("pointerdown", { pointerId: 1, isPrimary: true }));
+      laidOut = true;
+      scrollTo(1000);
+      await new Promise((resolve) => setTimeout(resolve, PAGE_DELAY + 50));
+      expect(said().at(-1)).toEqual({ k: PAGE, n: 2 });
+      expect(pages().scrollTop).toBe(1000);
+    });
+
+    // The app hides the frame before it closes it (the call screen left): a frame with no height
+    // may report its pages at the top, and that must not become the page the presenter keeps.
+    it("says and keeps nothing while its frame is hidden", async () => {
+      await core.open({ live: true, presenting: "lead", file: pdf() });
+      await settle();
+      scrollTo(2000);
+      await new Promise((resolve) => setTimeout(resolve, PAGE_DELAY + 50));
+      const kept = core.memory.get("present");
+
+      const height = Object.getOwnPropertyDescriptor(window, "innerHeight");
+      Object.defineProperty(window, "innerHeight", { value: 0, configurable: true });
+      try {
+        scrollTo(0);
+        await new Promise((resolve) => setTimeout(resolve, PAGE_DELAY + 50));
+      } finally {
+        if (height) Object.defineProperty(window, "innerHeight", height);
+        else delete window.innerHeight;
+      }
+      expect(said()).toEqual([{ k: PAGE, n: 3 }]);
+      expect(core.memory.get("present")).toBe(kept);
     });
 
     it("opens a document it never presented at the first page, and says nothing until it moves", async () => {
@@ -412,7 +529,7 @@ describe("the manifest", () => {
   const APP_LANGUAGES = ["es", "pt", "fr", "de", "it", "ro", "ru", "uk", "pl", "tr", "ar", "hi", "bn", "id", "vi", "th", "ja", "ko", "zh-CN", "zh-TW"];
 
   it("asks to talk to its twin, needs the core that presents, and speaks the app's languages", () => {
-    expect(manifest.version).toBe("1.1.1");
+    expect(manifest.version).toBe("1.1.2");
     expect(manifest.minCoreVersion).toBe("1.6.0");
     expect(manifest.permissions).toEqual({ live: true });
     expect(Object.keys(manifest.locales)).toEqual(APP_LANGUAGES);
