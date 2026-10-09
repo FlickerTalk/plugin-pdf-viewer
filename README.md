@@ -22,7 +22,12 @@ is the presenter's place (the document's name and size, and its page) in its own
   counter too). Opened outside a presentation, it says nothing on the live channel.
 - The presenter keeps its place: leaving the call screen closes the viewer, and when the presenter
   comes back it opens the same document at the page it was on and tells the other phone that page,
-  instead of starting again at the first one (1.1.1).
+  instead of starting again at the first one (1.1.1). It keeps that page until the pages have
+  landed on it or the presenter moves them, so a WebView slow to lay them out never sends the
+  other phone back to page 1 (1.1.2).
+- In a window that the frame fills (a tool's window, or the presentation area of a call: the
+  frame's `<html data-fill>`), the viewer is exactly the frame's height, so the bottom of the last
+  page can be reached (1.1.2). Elsewhere it is as tall as the screen allows.
 - Errors, with an icon and a text in the app's language: a broken file or none ("This PDF can't
   be opened") and a password-protected one ("This PDF is password protected").
 - Links inside the PDF are not followed. Dark mode follows the app.

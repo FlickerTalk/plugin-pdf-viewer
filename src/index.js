@@ -27,6 +27,8 @@ export const PAGE_DELAY = 300;
 /** The one key of the presenter's memory: the last document it presented and its page. One key,
  *  not one per document, because the core keeps at most 64 short keys for a plugin. */
 export const PRESENTED = "present";
+/** How long a viewer keeps trying to land on a page its pages are not laid out for yet. */
+export const JUMP_TIME = 2000;
 
 /** Which document is presented, as the presenter remembers it: its name and its size. */
 export function documentKey(file, bytes) {
@@ -176,10 +178,12 @@ class PdfViewer extends HTMLElement {
     this.pageTimer = null;
     this.documentKey = null;
     this.keptPage = 0;
+    this.target = 0;
+    this.jumpUntil = 0;
   }
 
   connectedCallback() {
-    this.style.height = `${Math.max(480, (globalThis.screen?.availHeight ?? 800) - 150)}px`;
+    this.fit();
     // In the page, not in a shadow root: the frame holds only this viewer, and Ionic's global
     // styles do not cross a shadow boundary. Each screen is its own header and content.
     this.view = this;
@@ -188,7 +192,16 @@ class PdfViewer extends HTMLElement {
     this.paint();
   }
 
+  /** In a frame that fills its window (`<html data-fill>`, app 1.6.0: a tool's window, or the
+   *  presentation area of a call) the viewer is exactly the frame's height; elsewhere, as tall as
+   *  the screen allows. The frame may say so only when it opens the viewer. */
+  fit() {
+    const filled = globalThis.document?.documentElement?.dataset?.fill !== undefined;
+    this.style.height = filled ? "100%" : `${Math.max(480, (globalThis.screen?.availHeight ?? 800) - 150)}px`;
+  }
+
   async onOpen(opening) {
+    this.fit();
     this.lang = opening.lang || "en";
     if (opening.dark) this.setAttribute("dark", "");
     // Opened by the app in a call (1.6.0), with the live channel: lead or follow the presenter.
@@ -217,13 +230,13 @@ class PdfViewer extends HTMLElement {
       this.layout();
       if (page) {
         this.keptPage = page;
-        this.goToPage(page);
+        this.jumpTo(page);
         this.sayPage();
       }
       if (this.wanted) {
         const page = this.wanted;
         this.wanted = 0;
-        this.goToPage(page);
+        this.jumpTo(page);
       }
     } catch (error) {
       this.state = failureOf(error);
@@ -253,6 +266,8 @@ class PdfViewer extends HTMLElement {
     const pages = this.view.querySelector("[data-pages]");
     pages.addEventListener("scroll", () => this.onScroll());
     pages.addEventListener("pointerdown", (event) => this.onPointerDown(event));
+    // The reader's own move wins over a page the viewer was still going to.
+    pages.addEventListener("wheel", () => (this.target = 0), { passive: true });
     pages.addEventListener("pointermove", (event) => this.onPointerMove(event));
     pages.addEventListener("pointerup", (event) => this.onPointerUp(event));
     pages.addEventListener("pointercancel", (event) => this.onPointerUp(event));
@@ -278,6 +293,8 @@ class PdfViewer extends HTMLElement {
   onScroll() {
     const pages = this.view.querySelector("[data-pages]");
     if (!pages || !this.sheets) return;
+    // A frame with no height (hidden by the app before it closes) has no page on screen.
+    if (globalThis.innerHeight === 0) return;
     const tops = this.sheets.map((sheet) => sheet.offsetTop);
     const heights = this.sheets.map((sheet) => sheet.offsetHeight);
     const top = pages.scrollTop;
@@ -291,6 +308,7 @@ class PdfViewer extends HTMLElement {
     }
     for (const at of near) if (!this.painted.has(at)) this.paintPage(at);
     const current = currentPage(top, height, tops, heights);
+    if (this.target && current + 1 === this.target) this.target = 0;
     if (current !== this.current) {
       this.current = current;
       const count = this.view.querySelector("[data-count]");
@@ -334,6 +352,7 @@ class PdfViewer extends HTMLElement {
     // A primary pointer is the first finger down, so none is left: a lift that never arrived (its
     // canvas repainted away under the finger) must not turn the next tap into a pinch.
     if (event.isPrimary) this.pointers.clear();
+    this.target = 0;
     this.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (this.pointers.size === 2) {
       const [a, b] = [...this.pointers.values()];
@@ -418,8 +437,10 @@ class PdfViewer extends HTMLElement {
     clearTimeout(this.pageTimer);
     this.pageTimer = null;
     if (this.presenting !== "lead" || this.state !== "ready") return;
-    void globalThis.ft.live.send(encode({ k: PAGE, n: this.current + 1 }));
-    this.keepPage(this.current + 1);
+    // Until the pages land on the page the presenter is going to, that page is the one it is on.
+    const page = this.target || this.current + 1;
+    void globalThis.ft.live.send(encode({ k: PAGE, n: page }));
+    this.keepPage(page);
   }
 
   /** What the twin said: a follower's hello (lead), or the presenter's page (follow). */
@@ -428,8 +449,29 @@ class PdfViewer extends HTMLElement {
     if (!message || !this.presenting) return;
     if (message.k === HELLO && this.presenting === "lead") return this.sayPage();
     if (message.k !== PAGE || this.presenting !== "follow") return;
-    if (this.state === "ready" && this.sheets?.length) this.goToPage(message.n);
+    if (this.state === "ready" && this.sheets?.length) this.jumpTo(message.n);
     else this.wanted = message.n;
+  }
+
+  /** Goes to page `n` and stays on its way there until the pages land on it (the WebView may not
+   *  have laid them out yet: the jump is tried again each frame for JUMP_TIME) or the reader moves
+   *  them. Meanwhile `n` is the page the viewer is on, as far as its twin and its memory know. */
+  jumpTo(n) {
+    const last = this.sheets?.length ?? 0;
+    if (!last) return;
+    this.target = Math.min(last, Math.max(1, Math.round(n)));
+    this.jumpUntil = Date.now() + JUMP_TIME;
+    this.goToPage(this.target);
+    this.landing();
+  }
+
+  landing() {
+    if (!this.target || Date.now() > this.jumpUntil) return;
+    requestAnimationFrame(() => {
+      if (!this.target || !this.isConnected) return;
+      this.goToPage(this.target);
+      this.landing();
+    });
   }
 
   /** Puts page `n` (from 1) at the top of the screen; past either end, the first or the last. */
