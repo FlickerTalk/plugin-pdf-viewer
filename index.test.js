@@ -83,7 +83,7 @@ describe("the catalogue and the package", () => {
   });
 });
 
-/** A fake core: it hands the file over, hears the close, carries the live channel, and keeps the
+/** A fake core: it hands the file over (or the one the user picks), hears the close, carries the live channel, and keeps the
  *  plugin's memory (`ft.store`), which outlives one opening when it is passed to the next core. */
 function fakeCore(memory = new Map()) {
   const handlers = [];
@@ -98,6 +98,7 @@ function fakeCore(memory = new Map()) {
     ft: {
       onOpen: (handler) => handlers.push(handler),
       close: vi.fn(),
+      pickFile: vi.fn(async () => null),
       live: { send: vi.fn(async () => true), onMessage: (handler) => heard.push(handler) },
       store: {
         get: vi.fn(async (key) => memory.get(key) ?? null),
@@ -191,7 +192,7 @@ describe("the view", () => {
   });
 
   it("says what is wrong in Ionic's content, with no bar of its own", async () => {
-    await core.open({ file: null });
+    await core.open({ file: { name: "x.pdf", mime: "application/pdf", data: fixture("broken.pdf").toString("base64") } });
     await settle();
     expect(element.querySelector(":scope > ion-header")).toBeNull();
     expect(element.querySelector(":scope > ion-content [role=alert]").textContent).toContain("can't be opened");
@@ -217,7 +218,7 @@ describe("the view", () => {
     expect(sheet().style.width).toBe(fit);
   });
 
-  it("says when the PDF is locked, broken, or missing", async () => {
+  it("says when the PDF is locked or broken", async () => {
     await core.open({ file: { name: "x.pdf", mime: "application/pdf", data: fixture("locked.pdf").toString("base64") } });
     await settle();
     expect(inside().querySelector("[role=alert]").textContent).toContain("password protected");
@@ -232,15 +233,57 @@ describe("the view", () => {
     await core.open({ file: { name: "x.pdf", mime: "application/pdf", data: fixture("broken.pdf").toString("base64") } });
     await settle();
     expect(inside().querySelector("[role=alert]").textContent).toContain("can't be opened");
+    // A file the chat handed over that fails is that file's error: nothing else to choose.
+    expect(inside().querySelector('[data-act="pick"]')).toBeNull();
+  });
 
-    core = fakeCore();
-    globalThis.ft = core.ft;
-    document.body.innerHTML = "";
-    element = document.createElement("ft-pdf-viewer");
-    document.body.append(element);
-    await core.open({ file: null });
-    await settle();
-    expect(inside().querySelector("[role=alert]").textContent).toContain("can't be opened");
+  // Issue #7: opened from the Apps tab, the viewer gets no file. That is no error: it offers to
+  // choose one, as the other tools do.
+  describe("opened with no file (from the Apps tab)", () => {
+    const pdf = (name) => ({ name: "menu.pdf", mime: "application/pdf", data: fixture(name).toString("base64") });
+
+    it("offers to choose a PDF, with an Ionic button, instead of an error", async () => {
+      await core.open({ file: null, lang: "es" });
+      await settle();
+      expect(element.state).toBe("empty");
+      expect(inside().querySelector("[role=alert]")).toBeNull();
+      expect(inside().querySelector(":scope > ion-content .state").textContent).toContain("Abre un PDF para leerlo aquí.");
+      const pick = inside().querySelector(':scope > ion-content ion-button[data-act="pick"]');
+      expect(pick.textContent).toContain("Elegir un PDF");
+      expect(pick.querySelector('[slot="start"]').getAttribute("style")).toContain("./icon/folder-open-outline.svg");
+    });
+
+    it("opens the PDF the user chooses, as if the chat had handed it over", async () => {
+      core.ft.pickFile = vi.fn(async () => pdf("simple.pdf"));
+      await core.open({ file: null });
+      await settle();
+      inside().querySelector('[data-act="pick"]').click();
+      await settle();
+      expect(core.ft.pickFile).toHaveBeenCalledWith("application/pdf");
+      expect(element.state).toBe("ready");
+      expect(inside().querySelectorAll(".sheet")).toHaveLength(3);
+      expect(inside().querySelector("[data-count]").textContent).toBe("1 / 3");
+      expect(core.ft.live.send).not.toHaveBeenCalled();
+    });
+
+    it("stays on its offer when nothing is chosen, and offers again after a PDF that fails", async () => {
+      core.ft.pickFile = vi.fn(async () => null);
+      await core.open({ file: null });
+      await settle();
+      inside().querySelector('[data-act="pick"]').click();
+      await settle();
+      expect(element.state).toBe("empty");
+      expect(inside().querySelector('[data-act="pick"]')).toBeTruthy();
+
+      core.ft.pickFile.mockResolvedValueOnce(pdf("broken.pdf"));
+      inside().querySelector('[data-act="pick"]').click();
+      await settle();
+      expect(inside().querySelector("[role=alert]").textContent).toContain("can't be opened");
+      core.ft.pickFile.mockResolvedValueOnce(pdf("simple.pdf"));
+      inside().querySelector('[data-act="pick"]').click();
+      await settle();
+      expect(element.state).toBe("ready");
+    });
   });
 });
 
@@ -529,7 +572,7 @@ describe("the manifest", () => {
   const APP_LANGUAGES = ["es", "pt", "fr", "de", "it", "ro", "ru", "uk", "pl", "tr", "ar", "hi", "bn", "id", "vi", "th", "ja", "ko", "zh-CN", "zh-TW"];
 
   it("asks to talk to its twin, needs the core that presents, and speaks the app's languages", () => {
-    expect(manifest.version).toBe("1.1.2");
+    expect(manifest.version).toBe("1.1.3");
     expect(manifest.minCoreVersion).toBe("1.6.0");
     expect(manifest.permissions).toEqual({ live: true });
     expect(Object.keys(manifest.locales)).toEqual(APP_LANGUAGES);

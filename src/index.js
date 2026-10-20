@@ -29,6 +29,8 @@ export const PAGE_DELAY = 300;
 export const PRESENTED = "present";
 /** How long a viewer keeps trying to land on a page its pages are not laid out for yet. */
 export const JUMP_TIME = 2000;
+/** What the picker offers when the viewer was opened with no file. */
+export const PDF = "application/pdf";
 
 /** Which document is presented, as the presenter remembers it: its name and its size. */
 export function documentKey(file, bytes) {
@@ -153,9 +155,11 @@ ft-pdf-viewer .sheet { position: relative; margin: 8px auto; background: #fff; b
 ft-pdf-viewer .sheet canvas { display: block; width: 100%; height: 100%; }
 ft-pdf-viewer .state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; flex: 1; padding: 40px 16px; text-align: center; }
 ft-pdf-viewer .state .i { width: 48px; height: 48px; opacity: .8; }
+ft-pdf-viewer .state > div { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+ft-pdf-viewer .state ion-button .i { width: 20px; height: 20px; margin: 0; margin-inline-end: 8px; opacity: 1; }
 `;
 
-const icon = (name) => `<i class="i" style="--i:url(./icon/${name}.svg)" aria-hidden="true"></i>`;
+const icon = (name, slot = "") => `<i class="i"${slot ? ` slot="${slot}"` : ""} style="--i:url(./icon/${name}.svg)" aria-hidden="true"></i>`;
 
 /** The viewer: the pages in a column, painted as they come near; a counter; zoom by pinch and
  *  double tap. The way out is the app's window. */
@@ -180,6 +184,7 @@ class PdfViewer extends HTMLElement {
     this.keptPage = 0;
     this.target = 0;
     this.jumpUntil = 0;
+    this.canPick = false;
   }
 
   connectedCallback() {
@@ -187,6 +192,9 @@ class PdfViewer extends HTMLElement {
     // In the page, not in a shadow root: the frame holds only this viewer, and Ionic's global
     // styles do not cross a shadow boundary. Each screen is its own header and content.
     this.view = this;
+    this.addEventListener("click", (event) => {
+      if (event.target.closest?.('[data-act="pick"]')) void this.pick();
+    });
     globalThis.ft?.onOpen?.((opening) => this.onOpen(opening));
     globalThis.ft?.live?.onMessage?.((data) => this.onLive(data));
     this.paint();
@@ -208,15 +216,33 @@ class PdfViewer extends HTMLElement {
     const role = opening.presenting;
     this.presenting = opening.live && (role === "lead" || role === "follow") ? role : null;
     if (this.presenting === "follow") void globalThis.ft.live.send(encode({ k: HELLO }));
-    if (!opening.file || !opening.file.data) {
-      this.state = "broken";
+    // Opened from the Apps tab, nothing is handed over: the viewer offers to choose a PDF. In a
+    // call the app always hands over the document presented, so none there is a failure.
+    const handed = Boolean(opening.file?.data);
+    this.canPick = !handed && !this.presenting;
+    if (!handed) {
+      this.state = this.canPick ? "empty" : "broken";
       return this.paint();
     }
+    await this.load(opening.file);
+  }
+
+  /** The PDF the user chooses, opened as one the chat hands over; nothing when none is chosen. */
+  async pick() {
+    const file = await globalThis.ft.pickFile(PDF);
+    if (!file?.data) return;
+    this.state = "loading";
+    this.paint();
+    await this.load(file);
+  }
+
+  /** Opens a file's bytes and lays its pages out, or says why it cannot. */
+  async load(file) {
     try {
-      const bytes = fromBase64(opening.file.data);
+      const bytes = fromBase64(file.data);
       // The presenter opened again (the call screen left and back): where it was, read before the
       // pages are ready so that nothing is said from the first page meanwhile.
-      const resumed = this.presenting === "lead" ? this.remembered(documentKey(opening.file, bytes)) : Promise.resolve(0);
+      const resumed = this.presenting === "lead" ? this.remembered(documentKey(file, bytes)) : Promise.resolve(0);
       this.document = await openDocument(bytes);
       this.pages = [];
       for (let number = 1; number <= this.document.numPages; number += 1) {
@@ -247,11 +273,22 @@ class PdfViewer extends HTMLElement {
   paint() {
     const T = (key) => t(this.lang, key);
     if (this.state !== "ready") {
+      // Opened with no file, the viewer offers the picker: at first, and again after a choice that fails.
+      const pick = this.canPick && this.state !== "loading"
+        ? `<ion-button data-act="pick">${icon("folder-open-outline", "start")}${escape(T("pick"))}</ion-button>`
+        : "";
+      if (this.state === "empty") {
+        this.view.innerHTML = `<style>${STYLE}</style>
+          <ion-content><div class="view">
+          <div class="state">${icon("document-text-outline")}<p>${escape(T("empty"))}</p>${pick}</div>
+          </div></ion-content>`;
+        return;
+      }
       const name = this.state === "locked" ? "lock-closed-outline" : this.state === "loading" ? "time-outline" : "warning-outline";
       const text = this.state === "locked" ? T("locked") : this.state === "loading" ? T("loading") : T("broken");
       this.view.innerHTML = `<style>${STYLE}</style>
         <ion-content><div class="view">
-        <div class="state" role="${this.state === "loading" ? "status" : "alert"}">${icon(name)}<p>${escape(text)}</p></div>
+        <div class="state"><div role="${this.state === "loading" ? "status" : "alert"}">${icon(name)}<p>${escape(text)}</p></div>${pick}</div>
         </div></ion-content>`;
       return;
     }

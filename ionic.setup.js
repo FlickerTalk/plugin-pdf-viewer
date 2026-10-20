@@ -3,10 +3,11 @@
 // runs. The tests do the same with the real `@ionic/core`, the version the app ships, so what the
 // plugin draws here is what the phone draws. None of it goes into `dist/`.
 import { initialize } from "@ionic/core/components";
+import { defineCustomElement as button } from "@ionic/core/components/ion-button.js";
 import { defineCustomElement as content } from "@ionic/core/components/ion-content.js";
 import { defineCustomElement as header } from "@ionic/core/components/ion-header.js";
 import { defineCustomElement as title } from "@ionic/core/components/ion-title.js";
 import { defineCustomElement as toolbar } from "@ionic/core/components/ion-toolbar.js";
 
 initialize();
-for (const define of [content, header, title, toolbar]) define();
+for (const define of [button, content, header, title, toolbar]) define();
