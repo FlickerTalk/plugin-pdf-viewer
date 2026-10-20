@@ -572,7 +572,7 @@ describe("the manifest", () => {
   const APP_LANGUAGES = ["es", "pt", "fr", "de", "it", "ro", "ru", "uk", "pl", "tr", "ar", "hi", "bn", "id", "vi", "th", "ja", "ko", "zh-CN", "zh-TW"];
 
   it("asks to talk to its twin, needs the core that presents, and speaks the app's languages", () => {
-    expect(manifest.version).toBe("1.1.2");
+    expect(manifest.version).toBe("1.1.3");
     expect(manifest.minCoreVersion).toBe("1.6.0");
     expect(manifest.permissions).toEqual({ live: true });
     expect(Object.keys(manifest.locales)).toEqual(APP_LANGUAGES);

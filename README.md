@@ -28,8 +28,11 @@ is the presenter's place (the document's name and size, and its page) in its own
 - In a window that the frame fills (a tool's window, or the presentation area of a call: the
   frame's `<html data-fill>`), the viewer is exactly the frame's height, so the bottom of the last
   page can be reached (1.1.2). Elsewhere it is as tall as the screen allows.
-- Errors, with an icon and a text in the app's language: a broken file or none ("This PDF can't
-  be opened") and a password-protected one ("This PDF is password protected").
+- Errors, with an icon and a text in the app's language: a broken file ("This PDF can't be
+  opened") and a password-protected one ("This PDF is password protected").
+- Opened with no file (from the Apps tab), it is no error: it offers to choose a PDF ("Choose a
+  PDF", `ft.pickFile("application/pdf")`) and opens the one chosen, and offers again if that one
+  fails (1.1.3).
 - Links inside the PDF are not followed. Dark mode follows the app.
 
 ## pdf.js inside the plugins' policy
